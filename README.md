@@ -132,7 +132,49 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 - Just type naturally - conversations auto-continue for 10 minutes
 - Quick replies like "1", "2", "yes", "no" always continue
 - Tap inline buttons for numbered options
-- Use `/dir ~/projects/foo` to switch directories and run Claude there
+
+## Multi-Directory Sessions
+
+Run Claude in different project directories simultaneously. Each directory maintains its own conversation context and history.
+
+**Switch directories:**
+```
+/dir ~/projects/backend
+```
+
+**List active sessions:**
+```
+/dirs
+```
+
+**Example workflow:**
+```
+You: /dir ~/projects/api
+Bot: 📂 Switched to api
+     Status: 💤 idle • fresh
+
+You: add input validation to the user endpoint
+Bot: [api] 🧠 Thinking...
+Bot: I'll add validation to src/routes/user.ts...
+
+You: /dir ~/projects/frontend
+Bot: 📂 Switched to frontend
+     Status: 💤 idle • fresh
+
+You: create a UserForm component
+Bot: [frontend] 🧠 Thinking...
+Bot: I'll create src/components/UserForm.tsx...
+
+You: /dirs
+Bot: Active Sessions
+    → 💤 frontend
+      💤 api
+```
+
+Each session:
+- Has its own 10-minute auto-continue window
+- Maintains separate conversation context
+- Shows directory name in status messages (e.g., `[api] Thinking...`)
 
 ## Configuration Reference
 
