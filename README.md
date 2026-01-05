@@ -137,14 +137,18 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 
 Run Claude in different project directories simultaneously. Each directory maintains its own conversation context and history.
 
-**Switch directories:**
+**Add a new directory:**
 ```
 /dir ~/projects/backend
 ```
 
-**List active sessions:**
+**Switch between sessions:** Use `/dirs` to see all sessions with numbered buttons:
 ```
-/dirs
+You: /dirs
+Bot: Active Sessions
+     → 1. 💤 frontend
+       2. 💤 api
+     [✓ 1. frontend] [2. api]   ← tap to switch!
 ```
 
 **Example workflow:**
@@ -159,22 +163,23 @@ Bot: I'll add validation to src/routes/user.ts...
 
 You: /dir ~/projects/frontend
 Bot: 📂 Switched to frontend
-     Status: 💤 idle • fresh
-
-You: create a UserForm component
-Bot: [frontend] 🧠 Thinking...
-Bot: I'll create src/components/UserForm.tsx...
 
 You: /dirs
 Bot: Active Sessions
-    → 💤 frontend
-      💤 api
+     → 1. 💤 frontend
+       2. 💤 api
+     [✓ 1. frontend] [2. api]
+
+You: *taps [2. api] button*
+Bot: 📂 Switched to api
+     Status: 💤 idle • in conversation
 ```
 
 Each session:
 - Has its own 10-minute auto-continue window
 - Maintains separate conversation context
 - Shows directory name in status messages (e.g., `[api] Thinking...`)
+- Quick-switch via numbered buttons
 
 ## Configuration Reference
 

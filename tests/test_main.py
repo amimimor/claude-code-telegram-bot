@@ -227,6 +227,28 @@ async def test_handle_command_dirs_empty():
 
 
 @pytest.mark.asyncio
+async def test_handle_callback_dir_switch():
+    """Test callback for directory switching."""
+    from claude_telegram.main import handle_callback
+    mock_session = MagicMock()
+    mock_session.is_running = False
+    mock_session.is_in_conversation = MagicMock(return_value=False)
+    mock_session.short_name = "myproject"
+    callback = {
+        "id": "123",
+        "data": "dir:/path/to/myproject",
+        "message": {"chat": {"id": 12345}},
+    }
+    with patch("claude_telegram.main.sessions") as mock_sessions:
+        mock_sessions.switch_session = MagicMock(return_value=mock_session)
+        with patch("claude_telegram.main.telegram.answer_callback", new_callable=AsyncMock):
+            with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+                await handle_callback(callback)
+                mock_sessions.switch_session.assert_called_once_with("/path/to/myproject")
+                assert "Switched" in mock_send.call_args[0][0]
+
+
+@pytest.mark.asyncio
 async def test_run_claude_when_busy():
     """Test run_claude when already running."""
     mock_runner = MagicMock()

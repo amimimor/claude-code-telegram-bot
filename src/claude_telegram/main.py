@@ -43,6 +43,23 @@ def get_runner():
     """Get the current session's runner."""
     return sessions.get_current_session()
 
+
+def build_session_buttons(session_list: list, current) -> dict:
+    """Build inline keyboard buttons for session selection."""
+    buttons = []
+    row = []
+    for i, (dir_key, session) in enumerate(session_list, 1):
+        # Mark current session with checkmark
+        label = f"{'✓ ' if session == current else ''}{i}. {session.short_name}"
+        row.append({"text": label, "callback_data": f"dir:{dir_key}"})
+        # Max 2 buttons per row
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return {"inline_keyboard": buttons}
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -268,13 +285,25 @@ async def handle_command(text: str, chat_id: str):
                 parse_mode="HTML",
             )
         else:
+            # Show session picker if sessions exist
+            session_list = sessions.list_sessions()
             current = get_runner()
-            await telegram.send_message(
-                f"📂 Current: <code>{current.short_name}</code>\n\n"
-                "Usage: <code>/dir &lt;path&gt;</code>",
-                chat_id=chat_id,
-                parse_mode="HTML",
-            )
+            if len(session_list) > 1:
+                buttons = build_session_buttons(session_list, current)
+                await telegram.send_message(
+                    f"📂 Current: <code>{current.short_name}</code>\n\n"
+                    "Select a session or use <code>/dir &lt;path&gt;</code> for new:",
+                    chat_id=chat_id,
+                    parse_mode="HTML",
+                    reply_markup=buttons,
+                )
+            else:
+                await telegram.send_message(
+                    f"📂 Current: <code>{current.short_name}</code>\n\n"
+                    "Usage: <code>/dir &lt;path&gt;</code>",
+                    chat_id=chat_id,
+                    parse_mode="HTML",
+                )
 
     elif cmd == "/dirs":
         session_list = sessions.list_sessions()
@@ -287,14 +316,16 @@ async def handle_command(text: str, chat_id: str):
         else:
             current = get_runner()
             lines = ["<b>Active Sessions</b>\n"]
-            for dir_key, session in session_list:
+            for i, (dir_key, session) in enumerate(session_list, 1):
                 marker = "→ " if session == current else "  "
                 status = "🔄" if session.is_running else "💤"
-                lines.append(f"{marker}{status} <code>{session.short_name}</code>")
+                lines.append(f"{marker}{i}. {status} <code>{session.short_name}</code>")
+            buttons = build_session_buttons(session_list, current)
             await telegram.send_message(
                 "\n".join(lines),
                 chat_id=chat_id,
                 parse_mode="HTML",
+                reply_markup=buttons,
             )
 
     elif cmd == "/compact":
@@ -362,6 +393,18 @@ async def handle_callback(callback: dict):
     if data.startswith("reply:"):
         reply = data[6:]  # Remove "reply:" prefix
         await run_claude(reply, chat_id, continue_session=True)
+
+    elif data.startswith("dir:"):
+        dir_path = data[4:]  # Remove "dir:" prefix
+        session = sessions.switch_session(dir_path)
+        status = "🔄 running" if session.is_running else "💤 idle"
+        conv = "in conversation" if session.is_in_conversation() else "fresh"
+        await telegram.send_message(
+            f"📂 Switched to <code>{session.short_name}</code>\n"
+            f"Status: {status} • {conv}",
+            chat_id=chat_id,
+            parse_mode="HTML",
+        )
 
 
 async def animate_status(chat_id: str, message_id: int, continue_session: bool, session_name: str):
