@@ -66,7 +66,7 @@ async def test_handle_command_start():
         await handle_command("/start", "12345")
         mock_send.assert_called_once()
         call_args = mock_send.call_args
-        assert "Commands:" in call_args[0][0]
+        assert "Commands" in call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -172,11 +172,13 @@ async def test_run_claude_success():
     with patch("claude_telegram.main.runner") as mock_runner:
         mock_runner.is_running = False
         mock_runner.run = AsyncMock(return_value="Claude response")
-        with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock):
-            with patch("claude_telegram.main.send_response", new_callable=AsyncMock) as mock_chunked:
-                await run_claude("Hello", "12345", continue_session=False)
-                mock_runner.run.assert_called_once()
-                mock_chunked.assert_called_once_with("Claude response", "12345")
+        with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = {"result": {"message_id": 123}}
+            with patch("claude_telegram.main.telegram.delete_message", new_callable=AsyncMock):
+                with patch("claude_telegram.main.send_response", new_callable=AsyncMock) as mock_chunked:
+                    await run_claude("Hello", "12345", continue_session=False)
+                    mock_runner.run.assert_called_once()
+                    mock_chunked.assert_called_once_with("Claude response", "12345")
 
 
 @pytest.mark.asyncio
@@ -186,10 +188,12 @@ async def test_run_claude_error():
         mock_runner.is_running = False
         mock_runner.run = AsyncMock(side_effect=Exception("Test error"))
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
-            await run_claude("Hello", "12345", continue_session=False)
-            # Should have sent error message
-            calls = mock_send.call_args_list
-            assert any("Error" in str(call) for call in calls)
+            mock_send.return_value = {"result": {"message_id": 123}}
+            with patch("claude_telegram.main.telegram.delete_message", new_callable=AsyncMock):
+                await run_claude("Hello", "12345", continue_session=False)
+                # Should have sent error message
+                calls = mock_send.call_args_list
+                assert any("Error" in str(call) for call in calls)
 
 
 @pytest.mark.asyncio
@@ -206,7 +210,7 @@ async def test_send_response_empty():
     with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
         await send_response("", "12345")
         mock_send.assert_called_once()
-        assert "empty" in mock_send.call_args[0][0].lower()
+        assert "no output" in mock_send.call_args[0][0].lower()
 
 
 @pytest.mark.asyncio

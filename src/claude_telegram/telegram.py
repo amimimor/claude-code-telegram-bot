@@ -3,6 +3,7 @@
 import logging
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 from .config import settings
 
@@ -57,11 +58,23 @@ async def edit_message(
         "chat_id": chat_id,
         "message_id": message_id,
         "text": text,
-        "parse_mode": parse_mode,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
 
     async with httpx.AsyncClient() as client:
         response = await client.post(f"{TELEGRAM_API}/editMessageText", json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
+async def delete_message(chat_id: str | int, message_id: int) -> dict:
+    """Delete a message."""
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{TELEGRAM_API}/deleteMessage",
+            json={"chat_id": chat_id, "message_id": message_id},
+        )
         response.raise_for_status()
         return response.json()
 
@@ -75,6 +88,18 @@ async def set_webhook(url: str) -> dict:
         )
         response.raise_for_status()
         return response.json()
+
+
+@retry(
+    stop=stop_after_attempt(15),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type(httpx.HTTPStatusError),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+async def set_webhook_with_retry(url: str) -> dict:
+    """Set webhook with exponential backoff retry for DNS propagation."""
+    return await set_webhook(url)
 
 
 async def delete_webhook() -> dict:

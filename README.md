@@ -1,100 +1,149 @@
 # Claude Telegram
 
-A simple Python bridge between Telegram and Claude Code. Control Claude Code remotely via Telegram.
+Control Claude Code remotely via Telegram. A Python/FastAPI bridge that lets you interact with Claude Code from anywhere.
 
-> **Attribution**: This project is inspired by and reimplements the core functionality of [Claude-Code-Remote](https://github.com/anthropics/Claude-Code-Remote), focusing specifically on Telegram integration with a cleaner Python/FastAPI architecture.
+> **Attribution**: Inspired by [Claude-Code-Remote](https://github.com/anthropics/Claude-Code-Remote), reimplemented with a cleaner Python architecture.
 
 ## Features
 
-- Send prompts to Claude Code via Telegram
-- **Auto-continue conversations** - just reply naturally, no commands needed
-- **Quick-reply buttons** for numbered options from Claude
-- Markdown responses converted to Telegram HTML formatting
-- Continue sessions with `/c` command
-- Run compaction with `/compact` command
-- Cancel running tasks with `/cancel`
-- Hook notifications when Claude completes tasks
+- **Animated status messages** - Rotating "Thinking...", "Pondering..." etc. while Claude works
+- **Auto-continue conversations** - Just reply naturally, no commands needed
+- **Quick-reply buttons** - Tap numbered options directly
+- **Markdown rendering** - Claude's markdown converted to Telegram HTML
+- **Smart session handling** - 10-minute auto-continue window
+- **Three connection modes** - Tunnel (default), Polling, or Webhook
 
-### Connection Modes
+## Quick Start
 
-- **Tunnel mode** (default) - Auto-creates public URL via Cloudflare Tunnel
-- **Polling mode** - No public URL needed, polls Telegram API
-- **Webhook mode** - Use your own public URL
+### 1. Create a Telegram Bot
 
-## Installation
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot` and follow the prompts
+3. Choose a name (e.g., "My Claude Bot")
+4. Choose a username (must end in `bot`, e.g., `my_claude_bot`)
+5. **Save the bot token** - looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
+
+### 2. Get Your Chat ID
+
+1. Start a chat with your new bot (search for it by username)
+2. Send any message to it (e.g., "hello")
+3. Open this URL in your browser (replace `YOUR_BOT_TOKEN`):
+   ```
+   https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates
+   ```
+4. Find `"chat":{"id":` in the response - that number is your chat ID
+   - Example: `"chat":{"id":7984476273` → your chat ID is `7984476273`
+
+### 3. Install Prerequisites
 
 ```bash
 # Clone the repo
 git clone https://github.com/yourusername/claude-telegram.git
 cd claude-telegram
 
-# Install with uv
+# Install Python dependencies
 uv sync
 
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your Telegram bot token and chat ID
-```
-
-### Prerequisites
-
-For **tunnel mode** (default), install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/):
-
-```bash
-# macOS
+# Install cloudflared (for tunnel mode)
+# macOS:
 brew install cloudflared
 
-# Linux
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-chmod +x /usr/local/bin/cloudflared
+# Linux:
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+  -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
 ```
 
-If cloudflared is not available, the app automatically falls back to polling mode.
-
-## Configuration
-
-Create a `.env` file:
-
-```env
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_CHAT_ID=your_chat_id_here
-
-# Claude Configuration
-CLAUDE_CLI_PATH=claude
-CLAUDE_WORKING_DIR=/path/to/your/project
-
-# Server
-HOST=0.0.0.0
-PORT=8000
-
-# Mode: "tunnel" (default), "polling", or "webhook"
-MODE=tunnel
-
-# Webhook settings (only if MODE=webhook)
-WEBHOOK_URL=https://your-public-url.com
-```
-
-### Getting Your Telegram Chat ID
-
-1. Start a chat with your bot
-2. Send any message
-3. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
-4. Find your `chat.id` in the response
-
-## Usage
-
-### Start the server
+### 4. Configure Environment
 
 ```bash
-# Tunnel mode (default - auto-creates public URL)
-uv run uvicorn claude_telegram.main:app --reload
-
-# Polling mode (no public URL needed)
-MODE=polling uv run uvicorn claude_telegram.main:app --reload
+cp .env.example .env
 ```
 
-### Docker
+Edit `.env`:
+```env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=7984476273
+CLAUDE_CLI_PATH=claude
+CLAUDE_WORKING_DIR=/path/to/your/project
+MODE=tunnel
+```
+
+### 5. Run
+
+```bash
+uv run uvicorn claude_telegram.main:app --host 0.0.0.0 --port 8000
+```
+
+You should see:
+```
+Starting Cloudflare tunnel...
+Tunnel started: https://random-words.trycloudflare.com
+Setting webhook...
+Webhook set successfully
+Application startup complete.
+```
+
+Now send a message to your bot!
+
+## Connection Modes
+
+### Tunnel Mode (Default)
+
+Uses Cloudflare's free quick tunnels to create a public URL automatically.
+
+**Note: DNS Propagation** - When the tunnel starts, it may take 2-5 minutes for the DNS to propagate globally. The app will automatically retry the webhook setup with exponential backoff. You'll see retry messages in the logs - this is normal. Once DNS propagates, you'll see "Webhook set successfully".
+
+```bash
+MODE=tunnel uv run uvicorn claude_telegram.main:app
+```
+
+### Polling Mode
+
+No public URL needed - polls Telegram's servers directly. Slightly higher latency but simpler setup.
+
+```bash
+MODE=polling uv run uvicorn claude_telegram.main:app
+```
+
+### Webhook Mode
+
+Use your own public URL (e.g., behind nginx, Caddy, or a cloud provider).
+
+```bash
+MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.main:app
+```
+
+## Telegram Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start`, `/help` | Show help with formatted commands |
+| `/c <message>` | Continue previous session |
+| `/new <message>` | Start fresh session (reset context) |
+| `/compact` | Compact conversation context |
+| `/cancel` | Cancel current running task |
+| `/status` | Check if Claude is running |
+| `<any text>` | Auto-continues if within 10 min, else new session |
+
+**Tips:**
+- Just type naturally - conversations auto-continue for 10 minutes
+- Quick replies like "1", "2", "yes", "no" always continue
+- Tap inline buttons for numbered options
+
+## Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_BOT_TOKEN` | (required) | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | (required) | Your chat ID (security: only this chat can use the bot) |
+| `CLAUDE_CLI_PATH` | `claude` | Path to Claude CLI |
+| `CLAUDE_WORKING_DIR` | (none) | Working directory for Claude |
+| `MODE` | `tunnel` | `tunnel`, `polling`, or `webhook` |
+| `HOST` | `0.0.0.0` | Server host |
+| `PORT` | `8000` | Server port |
+| `WEBHOOK_URL` | (none) | Your public URL (webhook mode only) |
+
+## Docker
 
 ```bash
 # Build
@@ -118,33 +167,9 @@ docker run -d \
   claude-telegram
 ```
 
-### Docker Compose
+## Claude Code Hooks
 
-```bash
-docker-compose up -d
-```
-
-### Telegram Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Show help |
-| `/help` | Show help |
-| `/c <message>` | Continue previous session |
-| `/new <message>` | Start fresh session |
-| `/compact` | Run compaction |
-| `/cancel` | Cancel current task |
-| `/status` | Check if Claude is running |
-| `<any message>` | Auto-continues if recent, else new session |
-
-**Tips:**
-- Just type naturally - conversations auto-continue for 10 minutes
-- Numbers like "1", "2" auto-continue (for Claude's numbered options)
-- Tap inline buttons for quick replies
-
-### Claude Code Hooks
-
-To get notifications when Claude finishes, configure hooks:
+Get notified in Telegram when Claude finishes:
 
 **Option 1: Environment variable**
 ```bash
@@ -156,55 +181,59 @@ claude
 ```json
 {
   "hooks": {
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python /path/to/claude-telegram/hook.py completed",
-            "timeout": 30000
-          }
-        ]
-      }
-    ]
+    "Stop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "python /path/to/claude-telegram/hook.py completed",
+        "timeout": 30000
+      }]
+    }]
   }
 }
 ```
 
+## Troubleshooting
+
+### "Webhook setup failed" / DNS errors
+
+This is normal for tunnel mode! Cloudflare quick tunnels take 2-5 minutes for DNS to propagate globally. The app retries automatically with exponential backoff (up to 15 attempts). Just wait.
+
+### Bot doesn't respond
+
+1. Check the chat ID matches your `.env`
+2. Make sure you messaged the bot first (it can't initiate)
+3. Check server logs for errors
+
+### "Claude is busy"
+
+Claude is still processing. Use `/cancel` to stop it, or wait.
+
 ## Development
 
-### Run tests
-
 ```bash
-uv run pytest -v --cov=claude_telegram --cov-report=term-missing
+# Run tests
+uv run pytest -v --cov=claude_telegram
+
+# Run with reload
+uv run uvicorn claude_telegram.main:app --reload
 ```
 
-### Project structure
+## Project Structure
 
 ```
 claude-telegram/
-├── src/
-│   └── claude_telegram/
-│       ├── __init__.py
-│       ├── main.py          # FastAPI app & webhook/polling handler
-│       ├── config.py        # Settings
-│       ├── telegram.py      # Telegram API client
-│       ├── claude.py        # Claude Code runner
-│       ├── tunnel.py        # Cloudflare Tunnel integration
-│       └── markdown.py      # Markdown to Telegram HTML
-├── tests/
-│   ├── conftest.py          # Pytest fixtures
-│   ├── test_main.py         # API tests
-│   ├── test_telegram.py     # Telegram service tests
-│   ├── test_claude.py       # Claude runner tests
-│   └── test_hook.py         # Hook script tests
-├── hook.py                  # Claude hook notification script
-├── claude-hooks.json        # Hook configuration
+├── src/claude_telegram/
+│   ├── main.py          # FastAPI app, webhook/polling handlers
+│   ├── config.py        # Pydantic settings
+│   ├── telegram.py      # Telegram API client
+│   ├── claude.py        # Claude CLI runner
+│   ├── tunnel.py        # Cloudflare Tunnel manager
+│   └── markdown.py      # MD → Telegram HTML
+├── tests/               # Pytest tests
+├── hook.py              # Hook notification script
 ├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-└── pyproject.toml
+└── docker-compose.yml
 ```
 
 ## License
