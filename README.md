@@ -6,11 +6,12 @@ Control Claude Code remotely via Telegram. A Python/FastAPI bridge that lets you
 
 ## Features
 
+- **Multi-session support** - Run Claude in different directories simultaneously
 - **Animated status messages** - Rotating "Thinking...", "Pondering..." etc. while Claude works
 - **Auto-continue conversations** - Just reply naturally, no commands needed
 - **Quick-reply buttons** - Tap numbered options directly
 - **Markdown rendering** - Claude's markdown converted to Telegram HTML
-- **Smart session handling** - 10-minute auto-continue window
+- **Smart session handling** - 10-minute auto-continue window per session
 - **Three connection modes** - Tunnel (default), Polling, or Webhook
 
 ## Quick Start
@@ -120,6 +121,8 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 | `/start`, `/help` | Show help with formatted commands |
 | `/c <message>` | Continue previous session |
 | `/new <message>` | Start fresh session (reset context) |
+| `/dir <path>` | Switch to a different directory/session |
+| `/dirs` | List all active sessions |
 | `/compact` | Compact conversation context |
 | `/cancel` | Cancel current running task |
 | `/status` | Check if Claude is running |
@@ -129,6 +132,7 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 - Just type naturally - conversations auto-continue for 10 minutes
 - Quick replies like "1", "2", "yes", "no" always continue
 - Tap inline buttons for numbered options
+- Use `/dir ~/projects/foo` to switch directories and run Claude there
 
 ## Configuration Reference
 

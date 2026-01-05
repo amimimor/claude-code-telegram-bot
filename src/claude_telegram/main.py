@@ -33,10 +33,15 @@ CONTINUE_MESSAGES = [
 ]
 
 from . import telegram
-from .claude import runner
+from .claude import sessions
 from .config import settings
 from .markdown import markdown_to_telegram_html
 from .tunnel import tunnel, CloudflareTunnel
+
+# Helper to get current runner
+def get_runner():
+    """Get the current session's runner."""
+    return sessions.get_current_session()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,23 +53,6 @@ logger = logging.getLogger(__name__)
 polling_task: asyncio.Task | None = None
 # Current tunnel URL (if using tunnel mode)
 tunnel_url: str | None = None
-
-# Conversation state - auto-continue after Claude responds
-last_interaction: datetime | None = None
-CONVERSATION_TIMEOUT = timedelta(minutes=10)  # Auto-continue window
-
-
-def is_in_conversation() -> bool:
-    """Check if we're in an active conversation (should auto-continue)."""
-    if last_interaction is None:
-        return False
-    return datetime.now() - last_interaction < CONVERSATION_TIMEOUT
-
-
-def update_conversation():
-    """Update the last interaction time."""
-    global last_interaction
-    last_interaction = datetime.now()
 
 
 async def poll_updates():
@@ -159,10 +147,13 @@ app = FastAPI(title="Claude Telegram", lifespan=lifespan)
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    current = sessions.get_current_session()
     return {
         "status": "ok",
-        "claude_running": runner.is_running,
-        "in_conversation": is_in_conversation(),
+        "claude_running": sessions.any_running(),
+        "current_session": current.short_name,
+        "in_conversation": current.is_in_conversation(),
+        "active_sessions": len(sessions.sessions),
     }
 
 
@@ -200,8 +191,9 @@ async def handle_message(message: dict):
     # Check if it's a quick reply (just a number like "1", "2", "yes", "no")
     quick_reply = is_quick_reply(text)
 
-    # Auto-continue if in conversation, otherwise start new
-    continue_session = is_in_conversation() or quick_reply
+    # Auto-continue if current session is in conversation
+    current = sessions.get_current_session()
+    continue_session = current.is_in_conversation() or quick_reply
     await run_claude(text, chat_id, continue_session=continue_session)
 
 
@@ -228,6 +220,8 @@ async def handle_command(text: str, chat_id: str):
             "<b>Commands</b>\n"
             "<code>/c &lt;msg&gt;</code> — Continue conversation\n"
             "<code>/new &lt;msg&gt;</code> — Fresh session\n"
+            "<code>/dir &lt;path&gt;</code> — Switch directory/session\n"
+            "<code>/dirs</code> — List active sessions\n"
             "<code>/compact</code> — Compact context\n"
             "<code>/cancel</code> — Stop current task\n"
             "<code>/status</code> — Check status\n\n"
@@ -251,8 +245,9 @@ async def handle_command(text: str, chat_id: str):
 
     elif cmd == "/new":
         if args:
-            global last_interaction
-            last_interaction = None  # Reset conversation
+            # Reset current session's conversation state
+            runner = get_runner()
+            runner.last_interaction = None
             await run_claude(args, chat_id, continue_session=False)
         else:
             await telegram.send_message(
@@ -261,7 +256,49 @@ async def handle_command(text: str, chat_id: str):
                 parse_mode="HTML",
             )
 
+    elif cmd == "/dir":
+        if args:
+            session = sessions.switch_session(args)
+            status = "🔄 running" if session.is_running else "💤 idle"
+            conv = "in conversation" if session.is_in_conversation() else "fresh"
+            await telegram.send_message(
+                f"📂 Switched to <code>{session.short_name}</code>\n"
+                f"Status: {status} • {conv}",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
+        else:
+            current = get_runner()
+            await telegram.send_message(
+                f"📂 Current: <code>{current.short_name}</code>\n\n"
+                "Usage: <code>/dir &lt;path&gt;</code>",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
+
+    elif cmd == "/dirs":
+        session_list = sessions.list_sessions()
+        if not session_list:
+            await telegram.send_message(
+                "No active sessions",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
+        else:
+            current = get_runner()
+            lines = ["<b>Active Sessions</b>\n"]
+            for dir_key, session in session_list:
+                marker = "→ " if session == current else "  "
+                status = "🔄" if session.is_running else "💤"
+                lines.append(f"{marker}{status} <code>{session.short_name}</code>")
+            await telegram.send_message(
+                "\n".join(lines),
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
+
     elif cmd == "/compact":
+        runner = get_runner()
         if runner.is_running:
             await telegram.send_message(
                 "⏳ Claude is busy — use <code>/cancel</code> first",
@@ -269,24 +306,34 @@ async def handle_command(text: str, chat_id: str):
                 parse_mode="HTML",
             )
             return
-        await telegram.send_message("🗜 <i>Compacting context...</i>", chat_id=chat_id, parse_mode="HTML")
+        await telegram.send_message(
+            f"🗜 <i>Compacting context for {runner.short_name}...</i>",
+            chat_id=chat_id,
+            parse_mode="HTML",
+        )
         result = await runner.compact()
         await send_response(result, chat_id)
 
     elif cmd == "/cancel":
+        runner = get_runner()
         if await runner.cancel():
-            await telegram.send_message("🛑 Cancelled", chat_id=chat_id, parse_mode="HTML")
+            await telegram.send_message(
+                f"🛑 Cancelled <code>{runner.short_name}</code>",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
         else:
             await telegram.send_message("Nothing to cancel", chat_id=chat_id, parse_mode="HTML")
 
     elif cmd == "/status":
+        runner = get_runner()
         if runner.is_running:
             status = "🔄 <b>Running</b>"
         else:
             status = "💤 <b>Idle</b>"
-        conv = "active" if is_in_conversation() else "new session"
+        conv = "in conversation" if runner.is_in_conversation() else "new session"
         await telegram.send_message(
-            f"{status} • {conv}",
+            f"📂 <code>{runner.short_name}</code>\n{status} • {conv}",
             chat_id=chat_id,
             parse_mode="HTML",
         )
@@ -317,13 +364,14 @@ async def handle_callback(callback: dict):
         await run_claude(reply, chat_id, continue_session=True)
 
 
-async def animate_status(chat_id: str, message_id: int, continue_session: bool):
+async def animate_status(chat_id: str, message_id: int, continue_session: bool, session_name: str):
     """Animate the status message with rotating messages."""
     messages = CONTINUE_MESSAGES if continue_session else THINKING_MESSAGES
+    prefix = f"[<code>{session_name}</code>] " if session_name != "default" else ""
     try:
         while True:
             await asyncio.sleep(2.5)  # Update every 2.5 seconds
-            new_status = random.choice(messages)
+            new_status = f"{prefix}{random.choice(messages)}"
             try:
                 await telegram.edit_message(message_id, new_status, chat_id, parse_mode="HTML")
             except Exception:
@@ -334,17 +382,22 @@ async def animate_status(chat_id: str, message_id: int, continue_session: bool):
 
 async def run_claude(message: str, chat_id: str, continue_session: bool = False):
     """Run Claude and send response to Telegram."""
+    runner = get_runner()
+    session_name = runner.short_name
+    prefix = f"[<code>{session_name}</code>] " if session_name != "default" else ""
+
     if runner.is_running:
         await telegram.send_message(
-            "⏳ Claude is busy — use <code>/cancel</code> to stop",
+            f"{prefix}⏳ Claude is busy — use <code>/cancel</code> to stop",
             chat_id=chat_id,
             parse_mode="HTML",
         )
         return
 
     # Send animated status message
+    initial_status = random.choice(CONTINUE_MESSAGES if continue_session else THINKING_MESSAGES)
     status_msg = await telegram.send_message(
-        random.choice(THINKING_MESSAGES if not continue_session else CONTINUE_MESSAGES),
+        f"{prefix}{initial_status}",
         chat_id=chat_id,
         parse_mode="HTML",
     )
@@ -354,12 +407,11 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
     animation_task = None
     if message_id:
         animation_task = asyncio.create_task(
-            animate_status(chat_id, message_id, continue_session)
+            animate_status(chat_id, message_id, continue_session, session_name)
         )
 
     try:
         result = await runner.run(message, continue_session=continue_session)
-        update_conversation()  # Mark as active conversation
 
         # Stop animation
         if animation_task:
@@ -371,7 +423,7 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
 
         # Delete status message and send response
         await telegram.delete_message(chat_id, message_id)
-        await send_response(result, chat_id)
+        await send_response(result, chat_id, session_name=session_name)
     except Exception as e:
         # Stop animation on error
         if animation_task:
@@ -385,13 +437,13 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
 
         logger.exception("Claude error")
         await telegram.send_message(
-            f"❌ <b>Error:</b> <code>{e}</code>",
+            f"{prefix}❌ <b>Error:</b> <code>{e}</code>",
             chat_id=chat_id,
             parse_mode="HTML",
         )
 
 
-async def send_response(text: str, chat_id: str, chunk_size: int = 4000):
+async def send_response(text: str, chat_id: str, chunk_size: int = 4000, session_name: str = "default"):
     """Send Claude's response, with quick-reply buttons if numbered options detected."""
     if not text.strip():
         await telegram.send_message(

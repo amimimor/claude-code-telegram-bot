@@ -97,9 +97,11 @@ async def test_handle_command_continue_no_args():
 @pytest.mark.asyncio
 async def test_handle_command_compact():
     """Test /compact command."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = False
-        mock_runner.compact = AsyncMock(return_value="Compacted")
+    mock_runner = MagicMock()
+    mock_runner.is_running = False
+    mock_runner.compact = AsyncMock(return_value="Compacted")
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock):
             with patch("claude_telegram.main.send_response", new_callable=AsyncMock) as mock_chunked:
                 await handle_command("/compact", "12345")
@@ -110,8 +112,9 @@ async def test_handle_command_compact():
 @pytest.mark.asyncio
 async def test_handle_command_compact_while_busy():
     """Test /compact when Claude is running."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = True
+    mock_runner = MagicMock()
+    mock_runner.is_running = True
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             await handle_command("/compact", "12345")
             assert "busy" in mock_send.call_args[0][0].lower()
@@ -120,8 +123,10 @@ async def test_handle_command_compact_while_busy():
 @pytest.mark.asyncio
 async def test_handle_command_cancel():
     """Test /cancel command."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.cancel = AsyncMock(return_value=True)
+    mock_runner = MagicMock()
+    mock_runner.cancel = AsyncMock(return_value=True)
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             await handle_command("/cancel", "12345")
             mock_runner.cancel.assert_called_once()
@@ -131,8 +136,9 @@ async def test_handle_command_cancel():
 @pytest.mark.asyncio
 async def test_handle_command_cancel_nothing():
     """Test /cancel when nothing is running."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.cancel = AsyncMock(return_value=False)
+    mock_runner = MagicMock()
+    mock_runner.cancel = AsyncMock(return_value=False)
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             await handle_command("/cancel", "12345")
             assert "Nothing" in mock_send.call_args[0][0]
@@ -141,8 +147,11 @@ async def test_handle_command_cancel_nothing():
 @pytest.mark.asyncio
 async def test_handle_command_status():
     """Test /status command."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = True
+    mock_runner = MagicMock()
+    mock_runner.is_running = True
+    mock_runner.is_in_conversation = MagicMock(return_value=True)
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             await handle_command("/status", "12345")
             assert "Running" in mock_send.call_args[0][0]
@@ -157,10 +166,73 @@ async def test_handle_command_unknown():
 
 
 @pytest.mark.asyncio
+async def test_handle_command_dir_with_path():
+    """Test /dir command with path."""
+    mock_session = MagicMock()
+    mock_session.is_running = False
+    mock_session.is_in_conversation = MagicMock(return_value=False)
+    mock_session.short_name = "myproject"
+    with patch("claude_telegram.main.sessions") as mock_sessions:
+        mock_sessions.switch_session = MagicMock(return_value=mock_session)
+        with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+            await handle_command("/dir /path/to/myproject", "12345")
+            mock_sessions.switch_session.assert_called_once_with("/path/to/myproject")
+            assert "Switched" in mock_send.call_args[0][0]
+            assert "myproject" in mock_send.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_handle_command_dir_no_args():
+    """Test /dir command without arguments."""
+    mock_runner = MagicMock()
+    mock_runner.short_name = "current"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
+        with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+            await handle_command("/dir", "12345")
+            assert "Current" in mock_send.call_args[0][0]
+            assert "current" in mock_send.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_handle_command_dirs():
+    """Test /dirs command."""
+    mock_session1 = MagicMock()
+    mock_session1.is_running = False
+    mock_session1.short_name = "project1"
+    mock_session2 = MagicMock()
+    mock_session2.is_running = True
+    mock_session2.short_name = "project2"
+    with patch("claude_telegram.main.sessions") as mock_sessions:
+        mock_sessions.list_sessions = MagicMock(return_value=[
+            ("/path/to/project1", mock_session1),
+            ("/path/to/project2", mock_session2),
+        ])
+        with patch("claude_telegram.main.get_runner", return_value=mock_session1):
+            with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+                await handle_command("/dirs", "12345")
+                message = mock_send.call_args[0][0]
+                assert "Active Sessions" in message
+                assert "project1" in message
+                assert "project2" in message
+
+
+@pytest.mark.asyncio
+async def test_handle_command_dirs_empty():
+    """Test /dirs command with no sessions."""
+    with patch("claude_telegram.main.sessions") as mock_sessions:
+        mock_sessions.list_sessions = MagicMock(return_value=[])
+        with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
+            await handle_command("/dirs", "12345")
+            assert "No active sessions" in mock_send.call_args[0][0]
+
+
+@pytest.mark.asyncio
 async def test_run_claude_when_busy():
     """Test run_claude when already running."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = True
+    mock_runner = MagicMock()
+    mock_runner.is_running = True
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             await run_claude("Hello", "12345", continue_session=False)
             assert "busy" in mock_send.call_args[0][0].lower()
@@ -169,24 +241,28 @@ async def test_run_claude_when_busy():
 @pytest.mark.asyncio
 async def test_run_claude_success():
     """Test successful Claude run."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = False
-        mock_runner.run = AsyncMock(return_value="Claude response")
+    mock_runner = MagicMock()
+    mock_runner.is_running = False
+    mock_runner.run = AsyncMock(return_value="Claude response")
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = {"result": {"message_id": 123}}
             with patch("claude_telegram.main.telegram.delete_message", new_callable=AsyncMock):
                 with patch("claude_telegram.main.send_response", new_callable=AsyncMock) as mock_chunked:
                     await run_claude("Hello", "12345", continue_session=False)
                     mock_runner.run.assert_called_once()
-                    mock_chunked.assert_called_once_with("Claude response", "12345")
+                    mock_chunked.assert_called_once_with("Claude response", "12345", session_name="test")
 
 
 @pytest.mark.asyncio
 async def test_run_claude_error():
     """Test Claude run with error."""
-    with patch("claude_telegram.main.runner") as mock_runner:
-        mock_runner.is_running = False
-        mock_runner.run = AsyncMock(side_effect=Exception("Test error"))
+    mock_runner = MagicMock()
+    mock_runner.is_running = False
+    mock_runner.run = AsyncMock(side_effect=Exception("Test error"))
+    mock_runner.short_name = "test"
+    with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = {"result": {"message_id": 123}}
             with patch("claude_telegram.main.telegram.delete_message", new_callable=AsyncMock):
