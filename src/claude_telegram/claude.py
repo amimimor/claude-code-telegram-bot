@@ -109,14 +109,18 @@ class SessionManager:
 
     def __init__(self):
         self.sessions: dict[str, ClaudeRunner] = {}
-        self.current_dir: str | None = settings.claude_working_dir
+        # Default to configured dir, or home directory if not set
+        default_dir = settings.claude_working_dir
+        if not default_dir:
+            default_dir = str(Path.home())
+        self.current_dir: str = default_dir
 
     def get_session(self, working_dir: str | None = None) -> ClaudeRunner:
         """Get or create a session for the given directory."""
-        dir_key = working_dir or self.current_dir or "default"
+        dir_key = working_dir or self.current_dir
 
         if dir_key not in self.sessions:
-            self.sessions[dir_key] = ClaudeRunner(working_dir=working_dir if working_dir != "default" else None)
+            self.sessions[dir_key] = ClaudeRunner(working_dir=dir_key)
             logger.info(f"Created new session for: {dir_key}")
 
         return self.sessions[dir_key]
@@ -127,6 +131,9 @@ class SessionManager:
 
     def switch_session(self, working_dir: str) -> ClaudeRunner:
         """Switch to a different session/directory."""
+        # Treat paths without / or ~ prefix as relative to home
+        if not working_dir.startswith("/") and not working_dir.startswith("~"):
+            working_dir = f"~/{working_dir}"
         # Expand ~ and resolve path
         expanded = str(Path(working_dir).expanduser().resolve())
         self.current_dir = expanded

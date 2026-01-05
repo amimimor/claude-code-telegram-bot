@@ -20,11 +20,11 @@ class Settings(BaseSettings):
     webhook_path: str = "/webhook"
     webhook_url: str | None = None  # Manual webhook URL (for "webhook" mode)
 
-    # Mode: "tunnel" (default), "polling", or "webhook"
-    # - tunnel: Auto-creates Cloudflare tunnel (recommended)
-    # - polling: No public URL needed, polls Telegram API
+    # Mode: "polling" (default), "tunnel", or "webhook"
+    # - polling: No public URL needed, polls Telegram API (recommended)
+    # - tunnel: Auto-creates Cloudflare tunnel
     # - webhook: Use manual webhook_url
-    mode: str = "tunnel"
+    mode: str = "polling"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

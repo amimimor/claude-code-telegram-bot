@@ -9,28 +9,35 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request
 
-# Claude-style status messages (like the CLI)
-THINKING_MESSAGES = [
-    "🧠 <i>Thinking...</i>",
-    "💭 <i>Pondering...</i>",
-    "🔮 <i>Contemplating...</i>",
-    "⚡ <i>Processing...</i>",
-    "🎯 <i>Working on it...</i>",
-    "✨ <i>Let me think...</i>",
-    "🌀 <i>Analyzing...</i>",
-    "🔍 <i>Looking into it...</i>",
-    "💫 <i>On it...</i>",
-    "🎨 <i>Crafting response...</i>",
+# Claude Code spinner words (from the CLI)
+# Source: https://github.com/levindixon/tengu_spinner_words
+SPINNER_VERBS = [
+    "Accomplishing", "Actioning", "Actualizing", "Baking", "Booping", "Brewing",
+    "Calculating", "Cerebrating", "Channelling", "Churning", "Clauding", "Coalescing",
+    "Cogitating", "Combobulating", "Computing", "Concocting", "Conjuring", "Considering",
+    "Contemplating", "Cooking", "Crafting", "Creating", "Crunching", "Deciphering",
+    "Deliberating", "Determining", "Discombobulating", "Divining", "Doing", "Effecting",
+    "Elucidating", "Enchanting", "Envisioning", "Finagling", "Flibbertigibbeting",
+    "Forging", "Forming", "Frolicking", "Generating", "Germinating", "Hatching",
+    "Herding", "Honking", "Hustling", "Ideating", "Imagining", "Incubating", "Inferring",
+    "Jiving", "Manifesting", "Marinating", "Meandering", "Moseying", "Mulling",
+    "Mustering", "Musing", "Noodling", "Percolating", "Perusing", "Philosophising",
+    "Pondering", "Pontificating", "Processing", "Puttering", "Puzzling", "Reticulating",
+    "Ruminating", "Scheming", "Schlepping", "Shimmying", "Shucking", "Simmering",
+    "Smooshing", "Spelunking", "Spinning", "Stewing", "Sussing", "Synthesizing",
+    "Thinking", "Tinkering", "Transmuting", "Unfurling", "Unravelling", "Vibing",
+    "Wandering", "Whirring", "Wibbling", "Wizarding", "Working", "Wrangling",
 ]
 
-CONTINUE_MESSAGES = [
-    "💬 <i>Continuing...</i>",
-    "🔄 <i>Picking up where we left off...</i>",
-    "📎 <i>Back on it...</i>",
-    "🧵 <i>Resuming...</i>",
-    "➡️ <i>Moving forward...</i>",
-    "🔗 <i>Reconnecting thoughts...</i>",
-]
+def get_thinking_message() -> str:
+    """Get a random thinking message with emoji."""
+    verb = random.choice(SPINNER_VERBS)
+    return f"✨ <i>{verb}...</i>"
+
+def get_continue_message() -> str:
+    """Get a random continue message with emoji."""
+    verb = random.choice(SPINNER_VERBS)
+    return f"🔄 <i>{verb}...</i>"
 
 from . import telegram
 from .claude import sessions
@@ -237,15 +244,15 @@ async def handle_command(text: str, chat_id: str):
             "<b>Commands</b>\n"
             "<code>/c &lt;msg&gt;</code> — Continue conversation\n"
             "<code>/new &lt;msg&gt;</code> — Fresh session\n"
-            "<code>/dir &lt;path&gt;</code> — Switch directory/session\n"
-            "<code>/dirs</code> — List active sessions\n"
+            "<code>/dir path</code> — Switch directory (relative to ~)\n"
+            "<code>/dirs</code> — List sessions + buttons\n"
             "<code>/compact</code> — Compact context\n"
             "<code>/cancel</code> — Stop current task\n"
             "<code>/status</code> — Check status\n\n"
             "<b>Tips</b>\n"
             "• Just type to chat — auto-continues for 10 min\n"
-            "• Numbers (1, 2) and yes/no auto-continue\n"
-            "• Tap buttons for quick replies",
+            "• <code>/dir projects/foo</code> = ~/projects/foo\n"
+            "• Tap buttons in /dirs to switch",
             chat_id=chat_id,
             parse_mode="HTML",
         )
@@ -292,7 +299,8 @@ async def handle_command(text: str, chat_id: str):
                 buttons = build_session_buttons(session_list, current)
                 await telegram.send_message(
                     f"📂 Current: <code>{current.short_name}</code>\n\n"
-                    "Select a session or use <code>/dir &lt;path&gt;</code> for new:",
+                    "Select or add new: <code>/dir projects/foo</code>\n"
+                    "<i>(paths are relative to home)</i>",
                     chat_id=chat_id,
                     parse_mode="HTML",
                     reply_markup=buttons,
@@ -300,7 +308,8 @@ async def handle_command(text: str, chat_id: str):
             else:
                 await telegram.send_message(
                     f"📂 Current: <code>{current.short_name}</code>\n\n"
-                    "Usage: <code>/dir &lt;path&gt;</code>",
+                    "Usage: <code>/dir projects/foo</code>\n"
+                    "<i>(paths are relative to home)</i>",
                     chat_id=chat_id,
                     parse_mode="HTML",
                 )
@@ -409,12 +418,12 @@ async def handle_callback(callback: dict):
 
 async def animate_status(chat_id: str, message_id: int, continue_session: bool, session_name: str):
     """Animate the status message with rotating messages."""
-    messages = CONTINUE_MESSAGES if continue_session else THINKING_MESSAGES
     prefix = f"[<code>{session_name}</code>] " if session_name != "default" else ""
     try:
         while True:
             await asyncio.sleep(2.5)  # Update every 2.5 seconds
-            new_status = f"{prefix}{random.choice(messages)}"
+            status = get_continue_message() if continue_session else get_thinking_message()
+            new_status = f"{prefix}{status}"
             try:
                 await telegram.edit_message(message_id, new_status, chat_id, parse_mode="HTML")
             except Exception:
@@ -438,7 +447,7 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
         return
 
     # Send animated status message
-    initial_status = random.choice(CONTINUE_MESSAGES if continue_session else THINKING_MESSAGES)
+    initial_status = get_continue_message() if continue_session else get_thinking_message()
     status_msg = await telegram.send_message(
         f"{prefix}{initial_status}",
         chat_id=chat_id,
