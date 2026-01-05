@@ -32,7 +32,7 @@ Control Claude Code remotely via Telegram. A Python/FastAPI bridge that lets you
    https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates
    ```
 4. Find `"chat":{"id":` in the response - that number is your chat ID
-   - Example: `"chat":{"id":7984476273` → your chat ID is `7984476273`
+   - Example: `"chat":{"id":123456789` → your chat ID is `123456789`
 
 ### 3. Install Prerequisites
 
@@ -62,7 +62,7 @@ cp .env.example .env
 Edit `.env`:
 ```env
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-TELEGRAM_CHAT_ID=7984476273
+TELEGRAM_CHAT_ID=123456789
 CLAUDE_CLI_PATH=claude
 CLAUDE_WORKING_DIR=/path/to/your/project
 MODE=tunnel
