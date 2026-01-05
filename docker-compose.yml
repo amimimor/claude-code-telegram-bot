@@ -1,0 +1,21 @@
+services:
+  claude-telegram:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - CLAUDE_CLI_PATH=${CLAUDE_CLI_PATH:-claude}
+      - CLAUDE_WORKING_DIR=${CLAUDE_WORKING_DIR:-/workspace}
+      - HOST=0.0.0.0
+      - PORT=8000
+      # Mode: tunnel (default), polling, or webhook
+      - MODE=${MODE:-tunnel}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+    volumes:
+      # Mount Claude CLI if running on host
+      - ${CLAUDE_CLI_PATH:-/usr/local/bin/claude}:/usr/local/bin/claude:ro
+      # Mount workspace for Claude to work in
+      - ${CLAUDE_WORKING_DIR:-.}:/workspace
+    restart: unless-stopped

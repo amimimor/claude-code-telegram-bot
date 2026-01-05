@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /Users/amitmor/Projects/claude-telegram/hook.py completed",
+            "timeout": 30000
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /Users/amitmor/Projects/claude-telegram/hook.py waiting",
+            "timeout": 30000
+          }
+        ]
+      }
+    ]
+  }
+}
