@@ -1,6 +1,7 @@
 """Claude Code runner - spawns and manages Claude processes."""
 
 import asyncio
+import hashlib
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,6 +11,54 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 CONVERSATION_TIMEOUT = timedelta(minutes=10)
+CLAUDE_DIR = Path.home() / ".claude"
+
+
+def get_project_dir(working_dir: str) -> Path | None:
+    """Get the Claude project directory for a working directory."""
+    # Claude stores projects in ~/.claude/projects/<path-hash>/
+    projects_dir = CLAUDE_DIR / "projects"
+    if not projects_dir.exists():
+        return None
+
+    # Try to find matching project directory
+    # Claude uses the absolute path as the directory name
+    abs_path = str(Path(working_dir).resolve())
+
+    # Check for exact path match first
+    for project_path in projects_dir.iterdir():
+        if project_path.is_dir() and project_path.name == abs_path.replace("/", "-")[1:]:
+            return project_path
+
+    # Fallback: look for any project dir that might match
+    for project_path in projects_dir.iterdir():
+        if project_path.is_dir():
+            # Check if this looks like our project
+            if working_dir.split("/")[-1] in project_path.name:
+                return project_path
+
+    return None
+
+
+def find_latest_session(working_dir: str) -> str | None:
+    """Find the most recent session ID for a working directory."""
+    project_dir = get_project_dir(working_dir)
+    if not project_dir:
+        return None
+
+    # Find most recent .jsonl file (excluding agent-* files)
+    sessions = [
+        f for f in project_dir.glob("*.jsonl")
+        if not f.name.startswith("agent-")
+    ]
+
+    if not sessions:
+        return None
+
+    # Get most recently modified
+    latest = max(sessions, key=lambda f: f.stat().st_mtime)
+    # Return session ID (filename without .jsonl)
+    return latest.stem
 
 
 class ClaudeRunner:
@@ -20,6 +69,7 @@ class ClaudeRunner:
         self.working_dir = working_dir or settings.claude_working_dir
         self.current_process: asyncio.subprocess.Process | None = None
         self.last_interaction: datetime | None = None
+        self.session_id: str | None = None  # Track session ID for --resume
 
     async def run(
         self,
@@ -33,7 +83,7 @@ class ClaudeRunner:
 
         Args:
             message: The prompt to send to Claude
-            continue_session: If True, use --continue flag
+            continue_session: If True, resume the session
             on_output: Optional callback for streaming output
 
         Returns:
@@ -42,7 +92,17 @@ class ClaudeRunner:
         cmd = [self.cli_path, "--print"]
 
         if continue_session:
-            cmd.append("--continue")
+            # Try to resume specific session, fall back to --continue
+            if self.session_id:
+                cmd.extend(["--resume", self.session_id])
+            else:
+                # Try to find existing session for this directory
+                session_id = find_latest_session(self.working_dir)
+                if session_id:
+                    cmd.extend(["--resume", session_id])
+                    self.session_id = session_id
+                else:
+                    cmd.append("--continue")
 
         # Prompt is a positional argument, not a flag
         cmd.append(message)
@@ -69,6 +129,13 @@ class ClaudeRunner:
         await self.current_process.wait()
         self.current_process = None
         self.last_interaction = datetime.now()
+
+        # Update session ID after run (new session may have been created)
+        if self.working_dir:
+            new_session_id = find_latest_session(self.working_dir)
+            if new_session_id:
+                self.session_id = new_session_id
+                logger.info(f"Session ID for {self.short_name}: {self.session_id}")
 
         return "".join(output_lines)
 

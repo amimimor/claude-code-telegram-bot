@@ -174,6 +174,7 @@ Bot: 📂 Switched to api
 ```
 
 Each session:
+- **Resumes from stored Claude sessions** - picks up where you left off using `~/.claude/projects/`
 - Has its own 10-minute auto-continue window
 - Maintains separate conversation context
 - Shows directory name in status messages (e.g., `[api] Thinking...`)
