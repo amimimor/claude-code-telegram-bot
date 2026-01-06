@@ -16,26 +16,26 @@ CLAUDE_DIR = Path.home() / ".claude"
 
 def get_project_dir(working_dir: str) -> Path | None:
     """Get the Claude project directory for a working directory."""
-    # Claude stores projects in ~/.claude/projects/<path-hash>/
+    # Claude stores projects in ~/.claude/projects/<path-with-dashes>/
+    # e.g., /Users/foo/bar -> -Users-foo-bar
     projects_dir = CLAUDE_DIR / "projects"
     if not projects_dir.exists():
         return None
 
-    # Try to find matching project directory
-    # Claude uses the absolute path as the directory name
+    # Convert path to Claude's format: /Users/foo/bar -> -Users-foo-bar
     abs_path = str(Path(working_dir).resolve())
+    claude_dir_name = abs_path.replace("/", "-")  # Keep leading dash
 
-    # Check for exact path match first
-    for project_path in projects_dir.iterdir():
-        if project_path.is_dir() and project_path.name == abs_path.replace("/", "-")[1:]:
-            return project_path
+    # Check for exact path match
+    project_path = projects_dir / claude_dir_name
+    if project_path.exists() and project_path.is_dir():
+        return project_path
 
     # Fallback: look for any project dir that might match
+    dir_name = working_dir.split("/")[-1]
     for project_path in projects_dir.iterdir():
-        if project_path.is_dir():
-            # Check if this looks like our project
-            if working_dir.split("/")[-1] in project_path.name:
-                return project_path
+        if project_path.is_dir() and project_path.name.endswith(f"-{dir_name}"):
+            return project_path
 
     return None
 
@@ -91,18 +91,22 @@ class ClaudeRunner:
         """
         cmd = [self.cli_path, "--print"]
 
-        if continue_session:
-            # Try to resume specific session, fall back to --continue
-            if self.session_id:
-                cmd.extend(["--resume", self.session_id])
-            else:
-                # Try to find existing session for this directory
-                session_id = find_latest_session(self.working_dir)
-                if session_id:
-                    cmd.extend(["--resume", session_id])
-                    self.session_id = session_id
-                else:
-                    cmd.append("--continue")
+        # Always try to resume an existing session for this directory
+        if self.session_id:
+            # We already have a session ID from previous run
+            cmd.extend(["--resume", self.session_id])
+        elif self.working_dir:
+            # Try to find existing session for this directory
+            session_id = find_latest_session(self.working_dir)
+            if session_id:
+                cmd.extend(["--resume", session_id])
+                self.session_id = session_id
+                logger.info(f"Resuming stored session {session_id} for {self.short_name}")
+            elif continue_session:
+                # Fallback to --continue if explicitly requested
+                cmd.append("--continue")
+        elif continue_session:
+            cmd.append("--continue")
 
         # Prompt is a positional argument, not a flag
         cmd.append(message)
