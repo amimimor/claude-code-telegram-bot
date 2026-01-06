@@ -175,10 +175,23 @@ Bot: 📂 Switched to api
 
 Each session:
 - **Resumes from stored Claude sessions** - picks up where you left off using `~/.claude/projects/`
+- **Shows previous context** - displays your last 5 messages when switching to a stored session
 - Has its own 10-minute auto-continue window
 - Maintains separate conversation context
 - Shows directory name in status messages (e.g., `[api] Thinking...`)
 - Quick-switch via numbered buttons
+
+**Context preview when switching:**
+```
+You: /dir projects/api
+Bot: 📂 Switched to api
+     Status: 💤 idle • fresh
+
+     📜 Previous context:
+     • add input validation to the user endpoint
+     • fix the failing tests in auth module
+     • update the API documentation
+```
 
 ## Configuration Reference
 

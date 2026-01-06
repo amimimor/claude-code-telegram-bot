@@ -101,12 +101,17 @@ class ClaudeRunner:
                         data = json.loads(line)
                         if data.get("type") == "user":
                             content = data.get("message", {}).get("content", [])
-                            for c in content:
-                                if c.get("type") == "text":
-                                    text = c.get("text", "").strip()
-                                    # Skip interrupts and very short messages
-                                    if text and len(text) > 10 and not text.startswith("[Request"):
-                                        messages.append(text[:120])
+                            # Content can be a string or a list
+                            if isinstance(content, str):
+                                text = content.strip()
+                                if text and len(text) > 10 and not text.startswith("[Request"):
+                                    messages.append(text[:120])
+                            elif isinstance(content, list):
+                                for c in content:
+                                    if isinstance(c, dict) and c.get("type") == "text":
+                                        text = c.get("text", "").strip()
+                                        if text and len(text) > 10 and not text.startswith("[Request"):
+                                            messages.append(text[:120])
                     except json.JSONDecodeError:
                         continue
         except Exception as e:
@@ -117,8 +122,8 @@ class ClaudeRunner:
             return None
 
         self.context_shown = True
-        # Return last 3 messages as bullet points
-        return "\n".join(f"• {m}" for m in messages[-3:])
+        # Return last 5 messages as bullet points
+        return "\n".join(f"• {m}" for m in messages[-5:])
 
     async def run(
         self,
