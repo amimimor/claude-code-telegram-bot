@@ -285,9 +285,18 @@ async def handle_command(text: str, chat_id: str):
             session = sessions.switch_session(args)
             status = "🔄 running" if session.is_running else "💤 idle"
             conv = "in conversation" if session.is_in_conversation() else "fresh"
+
+            # Check for stored session context
+            context = None
+            if not session.context_shown and not session.is_in_conversation():
+                context = session.get_session_context()
+
+            msg = f"📂 Switched to <code>{session.short_name}</code>\nStatus: {status} • {conv}"
+            if context:
+                msg += f"\n\n📜 <b>Previous context:</b>\n<i>{context}</i>"
+
             await telegram.send_message(
-                f"📂 Switched to <code>{session.short_name}</code>\n"
-                f"Status: {status} • {conv}",
+                msg,
                 chat_id=chat_id,
                 parse_mode="HTML",
             )
@@ -408,9 +417,18 @@ async def handle_callback(callback: dict):
         session = sessions.switch_session(dir_path)
         status = "🔄 running" if session.is_running else "💤 idle"
         conv = "in conversation" if session.is_in_conversation() else "fresh"
+
+        # Check for stored session context
+        context = None
+        if not session.context_shown and not session.is_in_conversation():
+            context = session.get_session_context()
+
+        msg = f"📂 Switched to <code>{session.short_name}</code>\nStatus: {status} • {conv}"
+        if context:
+            msg += f"\n\n📜 <b>Previous context:</b>\n<i>{context}</i>"
+
         await telegram.send_message(
-            f"📂 Switched to <code>{session.short_name}</code>\n"
-            f"Status: {status} • {conv}",
+            msg,
             chat_id=chat_id,
             parse_mode="HTML",
         )
@@ -445,6 +463,16 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
             parse_mode="HTML",
         )
         return
+
+    # Check for stored session context on first interaction
+    if not runner.context_shown and not runner.is_in_conversation():
+        context = runner.get_session_context()
+        if context:
+            await telegram.send_message(
+                f"{prefix}📜 <b>Resuming previous session:</b>\n<i>{context}</i>",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
 
     # Send animated status message
     initial_status = get_continue_message() if continue_session else get_thinking_message()

@@ -1,7 +1,7 @@
 """Claude Code runner - spawns and manages Claude processes."""
 
 import asyncio
-import hashlib
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -70,6 +70,55 @@ class ClaudeRunner:
         self.current_process: asyncio.subprocess.Process | None = None
         self.last_interaction: datetime | None = None
         self.session_id: str | None = None  # Track session ID for --resume
+        self.context_shown: bool = False  # Track if we've shown context for resumed session
+
+    def get_session_context(self) -> str | None:
+        """Get the last few user messages from a stored session."""
+        if not self.working_dir:
+            return None
+
+        project_dir = get_project_dir(self.working_dir)
+        if not project_dir:
+            return None
+
+        # Find most recent session file
+        sessions = [
+            f for f in project_dir.glob("*.jsonl")
+            if not f.name.startswith("agent-") and f.stat().st_size > 0
+        ]
+        if not sessions:
+            return None
+
+        latest = max(sessions, key=lambda f: f.stat().st_mtime)
+        self.session_id = latest.stem
+
+        # Read and parse user messages
+        messages = []
+        try:
+            with open(latest, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        data = json.loads(line)
+                        if data.get("type") == "user":
+                            content = data.get("message", {}).get("content", [])
+                            for c in content:
+                                if c.get("type") == "text":
+                                    text = c.get("text", "").strip()
+                                    # Skip interrupts and very short messages
+                                    if text and len(text) > 10 and not text.startswith("[Request"):
+                                        messages.append(text[:120])
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            logger.warning(f"Failed to read session file: {e}")
+            return None
+
+        if not messages:
+            return None
+
+        self.context_shown = True
+        # Return last 3 messages as bullet points
+        return "\n".join(f"• {m}" for m in messages[-3:])
 
     async def run(
         self,
