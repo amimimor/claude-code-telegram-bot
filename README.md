@@ -66,7 +66,7 @@ TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 TELEGRAM_CHAT_ID=123456789
 CLAUDE_CLI_PATH=claude
 CLAUDE_WORKING_DIR=/path/to/your/project
-MODE=tunnel
+MODE=polling
 ```
 
 ### 5. Run
@@ -88,22 +88,20 @@ Now send a message to your bot!
 
 ## Connection Modes
 
-### Tunnel Mode (Default)
+### Polling Mode (Default)
 
-Uses Cloudflare's free quick tunnels to create a public URL automatically.
+No public URL needed - polls Telegram's servers directly. Simple and reliable.
 
-**Note: DNS Propagation** - When the tunnel starts, it may take 2-5 minutes for the DNS to propagate globally. The app will automatically retry the webhook setup with exponential backoff. You'll see retry messages in the logs - this is normal. Once DNS propagates, you'll see "Webhook set successfully".
+```bash
+uv run uvicorn claude_telegram.main:app
+```
+
+### Tunnel Mode
+
+Uses Cloudflare's free quick tunnels to create a public URL automatically. Lower latency but requires DNS propagation (2-5 min on first start).
 
 ```bash
 MODE=tunnel uv run uvicorn claude_telegram.main:app
-```
-
-### Polling Mode
-
-No public URL needed - polls Telegram's servers directly. Slightly higher latency but simpler setup.
-
-```bash
-MODE=polling uv run uvicorn claude_telegram.main:app
 ```
 
 ### Webhook Mode
@@ -189,7 +187,7 @@ Each session:
 | `TELEGRAM_CHAT_ID` | (required) | Your chat ID (security: only this chat can use the bot) |
 | `CLAUDE_CLI_PATH` | `claude` | Path to Claude CLI |
 | `CLAUDE_WORKING_DIR` | (none) | Working directory for Claude |
-| `MODE` | `tunnel` | `tunnel`, `polling`, or `webhook` |
+| `MODE` | `polling` | `polling`, `tunnel`, or `webhook` |
 | `HOST` | `0.0.0.0` | Server host |
 | `PORT` | `8000` | Server port |
 | `WEBHOOK_URL` | (none) | Your public URL (webhook mode only) |
