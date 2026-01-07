@@ -157,7 +157,7 @@ class ClaudeRunner:
             message: The prompt to send to Claude
             continue_session: If True, resume the session
             on_output: Optional callback for streaming output
-            allowed_tools: Optional list of tools to allow (e.g., ["Bash:rm *", "Write:/tmp/*"])
+            allowed_tools: Optional list of tools to allow (e.g., ["Write", "Bash(echo:*)"])
 
         Returns:
             ClaudeResult with response text and any permission denials

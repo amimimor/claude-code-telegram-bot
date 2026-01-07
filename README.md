@@ -7,6 +7,7 @@ Control Claude Code remotely via Telegram. A Python/FastAPI bridge that lets you
 ## Features
 
 - **Multi-session support** - Run Claude in different directories simultaneously
+- **Permission handling** - Approve or deny Claude's permission requests via Telegram buttons
 - **Animated status messages** - Rotating "Thinking...", "Pondering..." etc. while Claude works
 - **Auto-continue conversations** - Just reply naturally, no commands needed
 - **Quick-reply buttons** - Tap numbered options directly
@@ -180,6 +181,32 @@ Each session:
 - Maintains separate conversation context
 - Shows directory name in status messages (e.g., `[api] Thinking...`)
 - Quick-switch via numbered buttons
+
+## Permission Handling
+
+When Claude needs to perform actions requiring permission (writing files, running commands, etc.), you'll get an interactive prompt in Telegram:
+
+```
+You: create a file /tmp/hello.txt with hello world
+
+Bot: ⚠️ Permission denied:
+     • Write to /tmp/hello.txt
+
+     I need write permission for `/tmp/hello.txt`.
+
+     [✅ Allow & Retry] [❌ Deny]
+```
+
+- **Allow & Retry** - Grants permission and retries the action
+- **Deny** - Cancels the request
+
+The bot captures permission denials from Claude's output and presents them as actionable buttons, so you can approve operations remotely without direct terminal access.
+
+**Supported permission types:**
+- `Write` - Creating or overwriting files
+- `Edit` - Modifying existing files
+- `Read` - Reading files outside the working directory
+- `Bash` - Running shell commands
 
 **Context preview when switching:**
 ```

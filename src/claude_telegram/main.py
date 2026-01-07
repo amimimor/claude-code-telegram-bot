@@ -405,7 +405,10 @@ async def handle_callback(callback: dict):
     data = callback.get("data", "")
     chat_id = callback["message"]["chat"]["id"]
 
+    logger.info(f"handle_callback: data={data}, chat_id={chat_id}")
+
     if not telegram.is_authorized(chat_id):
+        logger.warning(f"Unauthorized callback from {chat_id}")
         return
 
     # Answer the callback to remove loading state
@@ -438,6 +441,7 @@ async def handle_callback(callback: dict):
 
     elif data == "perm:allow":
         # User approved the permission request - retry with allowed tools
+        logger.info(f"perm:allow clicked, pending_permissions: {pending_permissions}")
         pending = pending_permissions.get(str(chat_id))
         if not pending:
             await telegram.send_message(
@@ -448,23 +452,23 @@ async def handle_callback(callback: dict):
             return
 
         # Build allowed tools list from denials
+        # Format: "Tool" or "Bash(pattern:*)" for command matching
         allowed_tools = []
         for denial in pending["denials"]:
             tool = denial.tool_name
             tool_input = denial.tool_input
-            if tool == "Write":
-                path = tool_input.get("file_path", "")
-                allowed_tools.append(f"Write:{path}")
-            elif tool == "Edit":
-                path = tool_input.get("file_path", "")
-                allowed_tools.append(f"Edit:{path}")
-            elif tool == "Read":
-                path = tool_input.get("file_path", "")
-                allowed_tools.append(f"Read:{path}")
+            if tool in ("Write", "Edit", "Read"):
+                # For file tools, just allow the tool (can't filter by path)
+                allowed_tools.append(tool)
             elif tool == "Bash":
+                # For Bash, try to match the specific command
                 cmd = tool_input.get("command", "")
-                # Allow the specific command
-                allowed_tools.append(f"Bash:{cmd}")
+                # Extract first word of command for pattern matching
+                first_word = cmd.split()[0] if cmd.split() else ""
+                if first_word:
+                    allowed_tools.append(f"Bash({first_word}:*)")
+                else:
+                    allowed_tools.append("Bash")
             else:
                 allowed_tools.append(tool)
 
@@ -576,6 +580,7 @@ async def run_claude(
         await telegram.delete_message(chat_id, message_id)
 
         # Check for permission denials
+        logger.info(f"Result: text={result.text[:100] if result.text else 'None'}, denials={result.permission_denials}")
         if result.permission_denials:
             await send_permission_request(
                 result, message, chat_id, session_name, sessions.current_dir
