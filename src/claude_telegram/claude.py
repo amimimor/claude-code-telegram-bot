@@ -3,10 +3,27 @@
 import asyncio
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import settings
+
+
+@dataclass
+class PermissionDenial:
+    """A permission that was denied during Claude execution."""
+    tool_name: str
+    tool_input: dict
+    tool_use_id: str = ""
+
+
+@dataclass
+class ClaudeResult:
+    """Result from running Claude, including any permission denials."""
+    text: str
+    permission_denials: list[PermissionDenial] = field(default_factory=list)
+    session_id: str | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +148,8 @@ class ClaudeRunner:
         *,
         continue_session: bool = False,
         on_output: callable = None,
-    ) -> str:
+        allowed_tools: list[str] | None = None,
+    ) -> ClaudeResult:
         """
         Run Claude Code with a message.
 
@@ -139,11 +157,16 @@ class ClaudeRunner:
             message: The prompt to send to Claude
             continue_session: If True, resume the session
             on_output: Optional callback for streaming output
+            allowed_tools: Optional list of tools to allow (e.g., ["Bash:rm *", "Write:/tmp/*"])
 
         Returns:
-            Claude's response
+            ClaudeResult with response text and any permission denials
         """
-        cmd = [self.cli_path, "--print"]
+        cmd = [self.cli_path, "--print", "--output-format", "stream-json", "--verbose"]
+
+        # Add allowed tools if specified
+        if allowed_tools:
+            cmd.extend(["--allowedTools", ",".join(allowed_tools)])
 
         # Always try to resume an existing session for this directory
         if self.session_id:
@@ -176,28 +199,66 @@ class ClaudeRunner:
             cwd=cwd,
         )
 
-        output_lines = []
+        # Parse stream-json output
+        result_text = ""
+        permission_denials = []
+        result_session_id = None
 
         async for line in self.current_process.stdout:
-            decoded = line.decode("utf-8", errors="replace")
-            output_lines.append(decoded)
-            if on_output:
-                await on_output(decoded)
+            decoded = line.decode("utf-8", errors="replace").strip()
+            if not decoded:
+                continue
+
+            try:
+                event = json.loads(decoded)
+                event_type = event.get("type")
+
+                # Extract result text from the final result event
+                if event_type == "result":
+                    result_text = event.get("result", "")
+                    result_session_id = event.get("session_id")
+                    # Parse permission denials
+                    for denial in event.get("permission_denials", []):
+                        permission_denials.append(PermissionDenial(
+                            tool_name=denial.get("tool_name", ""),
+                            tool_input=denial.get("tool_input", {}),
+                            tool_use_id=denial.get("tool_use_id", ""),
+                        ))
+
+                # Stream assistant text content for real-time output
+                if event_type == "assistant" and on_output:
+                    content = event.get("message", {}).get("content", [])
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            await on_output(c.get("text", ""))
+
+            except json.JSONDecodeError:
+                # Not JSON, might be stderr or other output
+                logger.debug(f"Non-JSON output: {decoded}")
+                continue
 
         await self.current_process.wait()
         self.current_process = None
         self.last_interaction = datetime.now()
 
-        # Update session ID after run (new session may have been created)
-        if self.working_dir:
+        # Update session ID after run
+        if result_session_id:
+            self.session_id = result_session_id
+        elif self.working_dir:
             new_session_id = find_latest_session(self.working_dir)
             if new_session_id:
                 self.session_id = new_session_id
-                logger.info(f"Session ID for {self.short_name}: {self.session_id}")
 
-        return "".join(output_lines)
+        if self.session_id:
+            logger.info(f"Session ID for {self.short_name}: {self.session_id}")
 
-    async def compact(self) -> str:
+        return ClaudeResult(
+            text=result_text,
+            permission_denials=permission_denials,
+            session_id=self.session_id,
+        )
+
+    async def compact(self) -> ClaudeResult:
         """Run compaction on the current session."""
         return await self.run("/compact", continue_session=True)
 

@@ -97,9 +97,10 @@ async def test_handle_command_continue_no_args():
 @pytest.mark.asyncio
 async def test_handle_command_compact():
     """Test /compact command."""
+    from claude_telegram.claude import ClaudeResult
     mock_runner = MagicMock()
     mock_runner.is_running = False
-    mock_runner.compact = AsyncMock(return_value="Compacted")
+    mock_runner.compact = AsyncMock(return_value=ClaudeResult(text="Compacted", permission_denials=[]))
     mock_runner.short_name = "test"
     with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock):
@@ -263,10 +264,13 @@ async def test_run_claude_when_busy():
 @pytest.mark.asyncio
 async def test_run_claude_success():
     """Test successful Claude run."""
+    from claude_telegram.claude import ClaudeResult
     mock_runner = MagicMock()
     mock_runner.is_running = False
-    mock_runner.run = AsyncMock(return_value="Claude response")
+    mock_runner.run = AsyncMock(return_value=ClaudeResult(text="Claude response", permission_denials=[]))
     mock_runner.short_name = "test"
+    mock_runner.context_shown = True  # Skip context check
+    mock_runner.is_in_conversation = MagicMock(return_value=True)
     with patch("claude_telegram.main.get_runner", return_value=mock_runner):
         with patch("claude_telegram.main.telegram.send_message", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = {"result": {"message_id": 123}}

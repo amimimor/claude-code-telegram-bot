@@ -40,10 +40,13 @@ def get_continue_message() -> str:
     return f"🔄 <i>{verb}...</i>"
 
 from . import telegram
-from .claude import sessions
+from .claude import sessions, ClaudeResult, PermissionDenial
 from .config import settings
 from .markdown import markdown_to_telegram_html
 from .tunnel import tunnel, CloudflareTunnel
+
+# Store pending permission requests for retry
+pending_permissions: dict[str, dict] = {}  # chat_id -> {message, denials, session_key}
 
 # Helper to get current runner
 def get_runner():
@@ -361,7 +364,7 @@ async def handle_command(text: str, chat_id: str):
             parse_mode="HTML",
         )
         result = await runner.compact()
-        await send_response(result, chat_id)
+        await send_response(result.text, chat_id)
 
     elif cmd == "/cancel":
         runner = get_runner()
@@ -433,6 +436,65 @@ async def handle_callback(callback: dict):
             parse_mode="HTML",
         )
 
+    elif data == "perm:allow":
+        # User approved the permission request - retry with allowed tools
+        pending = pending_permissions.get(str(chat_id))
+        if not pending:
+            await telegram.send_message(
+                "No pending permission request.",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
+            return
+
+        # Build allowed tools list from denials
+        allowed_tools = []
+        for denial in pending["denials"]:
+            tool = denial.tool_name
+            tool_input = denial.tool_input
+            if tool == "Write":
+                path = tool_input.get("file_path", "")
+                allowed_tools.append(f"Write:{path}")
+            elif tool == "Edit":
+                path = tool_input.get("file_path", "")
+                allowed_tools.append(f"Edit:{path}")
+            elif tool == "Read":
+                path = tool_input.get("file_path", "")
+                allowed_tools.append(f"Read:{path}")
+            elif tool == "Bash":
+                cmd = tool_input.get("command", "")
+                # Allow the specific command
+                allowed_tools.append(f"Bash:{cmd}")
+            else:
+                allowed_tools.append(tool)
+
+        # Clear pending and retry
+        original_message = pending["message"]
+        del pending_permissions[str(chat_id)]
+
+        await telegram.send_message(
+            f"✅ <i>Retrying with permissions...</i>",
+            chat_id=chat_id,
+            parse_mode="HTML",
+        )
+
+        await run_claude(
+            original_message,
+            chat_id,
+            continue_session=True,
+            allowed_tools=allowed_tools,
+        )
+
+    elif data == "perm:deny":
+        # User denied - just clear the pending request
+        if str(chat_id) in pending_permissions:
+            del pending_permissions[str(chat_id)]
+        await telegram.send_message(
+            "❌ Permission denied. Request cancelled.",
+            chat_id=chat_id,
+            parse_mode="HTML",
+        )
+
 
 async def animate_status(chat_id: str, message_id: int, continue_session: bool, session_name: str):
     """Animate the status message with rotating messages."""
@@ -450,7 +512,12 @@ async def animate_status(chat_id: str, message_id: int, continue_session: bool, 
         pass
 
 
-async def run_claude(message: str, chat_id: str, continue_session: bool = False):
+async def run_claude(
+    message: str,
+    chat_id: str,
+    continue_session: bool = False,
+    allowed_tools: list[str] | None = None,
+):
     """Run Claude and send response to Telegram."""
     runner = get_runner()
     session_name = runner.short_name
@@ -491,7 +558,11 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
         )
 
     try:
-        result = await runner.run(message, continue_session=continue_session)
+        result = await runner.run(
+            message,
+            continue_session=continue_session,
+            allowed_tools=allowed_tools,
+        )
 
         # Stop animation
         if animation_task:
@@ -501,9 +572,17 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
             except asyncio.CancelledError:
                 pass
 
-        # Delete status message and send response
+        # Delete status message
         await telegram.delete_message(chat_id, message_id)
-        await send_response(result, chat_id, session_name=session_name)
+
+        # Check for permission denials
+        if result.permission_denials:
+            await send_permission_request(
+                result, message, chat_id, session_name, sessions.current_dir
+            )
+        else:
+            await send_response(result.text, chat_id, session_name=session_name)
+
     except Exception as e:
         # Stop animation on error
         if animation_task:
@@ -521,6 +600,69 @@ async def run_claude(message: str, chat_id: str, continue_session: bool = False)
             chat_id=chat_id,
             parse_mode="HTML",
         )
+
+
+async def send_permission_request(
+    result: ClaudeResult,
+    original_message: str,
+    chat_id: str,
+    session_name: str,
+    session_dir: str,
+):
+    """Send permission denial info to user with Allow/Deny buttons."""
+    prefix = f"[<code>{session_name}</code>] " if session_name != "default" else ""
+
+    # Format the denied permissions
+    denial_lines = []
+    for d in result.permission_denials:
+        tool = d.tool_name
+        if tool == "Write":
+            path = d.tool_input.get("file_path", "unknown")
+            denial_lines.append(f"• <b>Write</b> to <code>{path}</code>")
+        elif tool == "Bash":
+            cmd = d.tool_input.get("command", "unknown")[:60]
+            denial_lines.append(f"• <b>Bash</b>: <code>{cmd}</code>")
+        elif tool == "Edit":
+            path = d.tool_input.get("file_path", "unknown")
+            denial_lines.append(f"• <b>Edit</b> <code>{path}</code>")
+        elif tool == "Read":
+            path = d.tool_input.get("file_path", "unknown")
+            denial_lines.append(f"• <b>Read</b> <code>{path}</code>")
+        else:
+            denial_lines.append(f"• <b>{tool}</b>: {str(d.tool_input)[:50]}")
+
+    # Store pending request for retry
+    pending_permissions[str(chat_id)] = {
+        "message": original_message,
+        "denials": result.permission_denials,
+        "session_dir": session_dir,
+    }
+
+    # Build message with buttons
+    msg = (
+        f"{prefix}⚠️ <b>Permission denied:</b>\n"
+        + "\n".join(denial_lines)
+    )
+
+    # Also show partial result if any
+    if result.text.strip():
+        msg += f"\n\n<i>{result.text[:500]}</i>"
+
+    buttons = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Allow & Retry", "callback_data": "perm:allow"},
+                {"text": "❌ Deny", "callback_data": "perm:deny"},
+            ]
+        ]
+    }
+
+    await telegram.send_message(
+        msg,
+        chat_id=chat_id,
+        parse_mode="HTML",
+        reply_markup=buttons,
+    )
 
 
 async def send_response(text: str, chat_id: str, chunk_size: int = 4000, session_name: str = "default"):
@@ -619,6 +761,27 @@ async def notify(event_type: str):
 
     await telegram.send_message(msg)
     return {"ok": True}
+
+
+@app.post("/test")
+async def test_message(request: Request):
+    """Test endpoint - send a message as if from Telegram."""
+    data = await request.json()
+    text = data.get("text", "")
+    chat_id = str(settings.telegram_chat_id)
+
+    if not text:
+        return {"error": "No text provided"}
+
+    # Handle as if it's a Telegram message
+    if text.startswith("/"):
+        await handle_command(text, chat_id)
+    else:
+        current = sessions.get_current_session()
+        continue_session = current.is_in_conversation()
+        await run_claude(text, chat_id, continue_session=continue_session)
+
+    return {"ok": True, "text": text}
 
 
 def main():
