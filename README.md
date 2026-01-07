@@ -136,6 +136,8 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 
 Run Claude in different project directories simultaneously. Each directory maintains its own conversation context and history.
 
+> **⚠️ Important:** Avoid using `/dir` on directories where you're actively running Claude locally. The bot and local CLI share the same session files (`~/.claude/projects/`), which can cause conflicts and unexpected behavior. Use the bot for directories you're not working on locally, or close your local Claude session first.
+
 **Add a new directory:**
 ```
 /dir ~/projects/backend
