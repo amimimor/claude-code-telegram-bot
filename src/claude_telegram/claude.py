@@ -329,6 +329,28 @@ class SessionManager:
         """List all active sessions."""
         return list(self.sessions.items())
 
+    def remove_session(self, working_dir: str) -> bool:
+        """Remove a session from the manager. Returns True if removed."""
+        # Normalize path like switch_session does
+        if not working_dir.startswith("/") and not working_dir.startswith("~"):
+            working_dir = f"~/{working_dir}"
+        resolved = str(Path(working_dir).expanduser().resolve())
+
+        if resolved in self.sessions:
+            session = self.sessions[resolved]
+            # Don't remove if running
+            if session.is_running:
+                return False
+            del self.sessions[resolved]
+            # If we removed the current session, switch to another or default
+            if self.current_dir == resolved:
+                if self.sessions:
+                    self.current_dir = next(iter(self.sessions.keys()))
+                else:
+                    self.current_dir = str(Path.home())
+            return True
+        return False
+
     def any_running(self) -> bool:
         """Check if any session is currently running."""
         return any(s.is_running for s in self.sessions.values())

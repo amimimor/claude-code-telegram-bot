@@ -122,6 +122,7 @@ MODE=webhook WEBHOOK_URL=https://your-domain.com uv run uvicorn claude_telegram.
 | `/new <message>` | Start fresh session (reset context) |
 | `/dir <path>` | Switch to a different directory/session |
 | `/dirs` | List all active sessions |
+| `/rmdir <path>` | Remove a session from the list |
 | `/compact` | Compact conversation context |
 | `/cancel` | Cancel current running task |
 | `/status` | Check if Claude is running |

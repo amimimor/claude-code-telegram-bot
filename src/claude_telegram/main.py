@@ -249,6 +249,7 @@ async def handle_command(text: str, chat_id: str):
             "<code>/new &lt;msg&gt;</code> — Fresh session\n"
             "<code>/dir path</code> — Switch directory (relative to ~)\n"
             "<code>/dirs</code> — List sessions + buttons\n"
+            "<code>/rmdir path</code> — Remove a session\n"
             "<code>/compact</code> — Compact context\n"
             "<code>/cancel</code> — Stop current task\n"
             "<code>/status</code> — Check status\n\n"
@@ -338,9 +339,14 @@ async def handle_command(text: str, chat_id: str):
             current = get_runner()
             lines = ["<b>Active Sessions</b>\n"]
             for i, (dir_key, session) in enumerate(session_list, 1):
-                marker = "→ " if session == current else "  "
-                status = "🔄" if session.is_running else "💤"
-                lines.append(f"{marker}{i}. {status} <code>{session.short_name}</code>")
+                is_current = session == current
+                if session.is_running:
+                    status = "🔄"  # Running
+                elif is_current:
+                    status = "📍"  # Current/selected
+                else:
+                    status = "💤"  # Idle
+                lines.append(f"{i}. {status} <code>{session.short_name}</code>")
             buttons = build_session_buttons(session_list, current)
             await telegram.send_message(
                 "\n".join(lines),
@@ -389,6 +395,30 @@ async def handle_command(text: str, chat_id: str):
             chat_id=chat_id,
             parse_mode="HTML",
         )
+
+    elif cmd == "/rmdir":
+        if args:
+            if sessions.remove_session(args):
+                current = get_runner()
+                await telegram.send_message(
+                    f"🗑 Removed session <code>{args}</code>\n"
+                    f"📍 Current: <code>{current.short_name}</code>",
+                    chat_id=chat_id,
+                    parse_mode="HTML",
+                )
+            else:
+                await telegram.send_message(
+                    f"❌ Could not remove <code>{args}</code>\n"
+                    "<i>(Session not found or currently running)</i>",
+                    chat_id=chat_id,
+                    parse_mode="HTML",
+                )
+        else:
+            await telegram.send_message(
+                "Usage: <code>/rmdir path</code>",
+                chat_id=chat_id,
+                parse_mode="HTML",
+            )
 
     else:
         # Unknown command - maybe they meant to chat?
